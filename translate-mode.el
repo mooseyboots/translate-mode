@@ -56,6 +56,11 @@
   "Default face for highlighting the current paragraph in `translate-mode'."
   :group 'translate)
 
+(defcustom translate-highlight-by-sentence nil
+  "Whether to highlight text by sentences. If nil, highlight by paragraphs."
+  :type 'boolean
+  :group 'translate)
+
 (defvar translate-enable-highlight t
   "Enable highlighting if non-nil.")
 (defvar translate-reference-buffer-read-only t
@@ -85,6 +90,10 @@
   "Forward paragraph function. Default to 'forward-paragraph.")
 (defvar translate-backward-paragraph-function 'backward-paragraph
   "Backward paragraph function. Default to 'backward-paragraph.")
+(defvar translate-forward-sentence-function 'forward-sentence
+  "Forward sentence function. Default to 'forward-sentence.")
+(defvar translate-backward-sentence-function 'backward-sentence
+  "Backward sentence function. Default to 'backward-sentence.")
 (defvar translate-beginning-of-buffer-function 'beginning-of-buffer
   "Beginning of buffer function. Default to 'beginning-of-buffer.")
 (defvar translate-end-of-buffer-function 'end-of-buffer
@@ -160,6 +169,16 @@ ARG defaults to 1."
   (interactive)
   (translate--master-slave-call translate-backward-paragraph-function))
 
+(defun translate-forward-sentence ()
+  "Forward sentence in both buffers."
+  (interactive)
+  (translate--master-slave-call translate-forward-sentence-function))
+
+(defun translate-backward-sentence ()
+  "Backward sentence in both buffers."
+  (interactive)
+  (translate--master-slave-call translate-backward-sentence-function))
+
 (defun translate-beginning-of-buffer ()
   "Go to beginning of buffer in both buffers."
   (interactive)
@@ -210,9 +229,12 @@ ARG is the argument to pass to `translate-recenter-function'."
     (message "Sync to paragraph %s" i)))
 
 (defun translate--get-overlay-at-point ()
-  "Get the paragraph the point belongs to as an overlay."
+  "Get the paragraph the point belongs to as an overlay.
+If `translate-highlight-by-sentence' is non-nil, get the sentence at point."
   (save-excursion
-    (let ((pair (translate--get-paragraph-beg-end-at-point)))
+    (let ((pair (if translate-highlight-by-sentence
+                    (translate--get-sentence-beg-end-at-point)
+                  translate--get-paragraph-beg-end-at-point)))
       (if translate--overlay
           (move-overlay translate--overlay (car pair) (cdr pair))
         (setq-local translate--overlay (make-overlay (car pair) (cdr pair)))))))
@@ -228,6 +250,23 @@ ARG is the argument to pass to `translate-recenter-function'."
          (end (cond ((not (looking-at "^$"))
                      (save-excursion
                        (call-interactively translate-forward-paragraph-function)
+                       (point)))
+                    (t beg))))
+    (cons beg end)))
+
+(defun translate--get-sentence-beg-end-at-point ()
+  "Get the begin and end positions of a sentence."
+  (let* ((beg (cond ((not (looking-at "^$"))
+                     (save-excursion
+                       (forward-char)
+                       (call-interactively translate-backward-sentence-function)
+                       (point)))
+                    (t (point))))
+         (end (cond ((not (looking-at "^$"))
+                     (save-excursion
+                       (forward-char)
+                       (call-interactively translate-backward-sentence-function)
+                       (call-interactively translate-forward-sentence-function)
                        (point)))
                     (t beg))))
     (cons beg end)))
@@ -303,6 +342,8 @@ ARG will be directly passed to `translate-reference-mode'."
     (define-key map [remap scroll-down-command] #'translate-scroll-down)
     (define-key map [remap forward-paragraph] #'translate-forward-paragraph)
     (define-key map [remap backward-paragraph] #'translate-backward-paragraph)
+    (define-key map [remap forward-sentence] #'translate-forward-sentence)
+    (define-key map [remap backward-sentence] #'translate-backward-sentence)
     (define-key map [remap beginning-of-buffer] #'translate-beginning-of-buffer)
     (define-key map [remap end-of-buffer] #'translate-end-of-buffer)
     (define-key map [remap recenter-top-bottom] #'translate-recenter)
@@ -323,6 +364,10 @@ ARG will be directly passed to `translate-reference-mode'."
   :group 'translate
   :after-hook (if translate-mode
                   (progn
+                    (when (equal major-mode 'org-mode)
+                      (define-key translate-mode-map [remap org-forward-sentence] #'translate-forward-sentence)
+                      (define-key translate-mode-map [remap org-backward-sentence] #'translate-backward-sentence)
+                      )
                     (make-local-variable 'translate--overlay)
                     (setq-local translate--overlay (make-overlay 0 0 (current-buffer)))
                     (when (bound-and-true-p cua-mode)
